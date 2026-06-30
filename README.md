@@ -9,6 +9,7 @@ A full-stack scientific calculator application with a **Java Spring Boot** backe
 - [Functional Requirements](#functional-requirements)
 - [Non-Functional Requirements](#non-functional-requirements)
 - [Software Architecture](#software-architecture)
+- [Add Operation — Sequence Diagram](#add-operation--sequence-diagram)
 - [Best Practices](#best-practices)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
@@ -221,6 +222,70 @@ com.calculator
 
 #### `DELETE /api/history`
 Clears the session history. Returns `204 No Content`.
+
+---
+
+## Add Operation — Sequence Diagram
+
+The diagram below traces a full **3 + 5 = 8** calculation from button press to displayed result, across all layers of the stack.
+
+### Phases
+
+| Phase | Participants | What happens |
+|---|---|---|
+| **1 — Input accumulation** | User → ButtonPad → Zustand Store | Each button click (`3`, `+`, `5`) calls `appendToExpression()`, which concatenates the character onto the `expression` string in the store. No backend is involved; `CalculatorDisplay` re-renders reactively. |
+| **2 — Calculation trigger** | User → ButtonPad → Zustand Store | Pressing `=` calls `store.calculate()`. The store sets `isLoading: true` (spinner appears) and calls `calculatorApi.calculate("3+5", "DEGREES")`. |
+| **3 — HTTP request** | calculatorApi (Axios) → CalculatorController → CalculatorService → ExpressionEvaluator | Axios fires `POST /api/calculate` with `{ expression: "3+5", angleMode: "DEGREES" }`. Spring's `@Valid` validates the DTO. The controller delegates to `CalculatorService`, which calls `ExpressionEvaluator.evaluate()`. exp4j parses and evaluates the expression — no trig functions are involved, so the degree→radian conversion is skipped. The result `8.0` passes the NaN/Infinity guard. The controller saves the entry to `HistoryService` and returns `HTTP 200`. |
+| **4 — Response propagation** | CalculatorController → calculatorApi → Zustand Store → ButtonPad / HistoryPanel | The JSON response travels back through Axios to the store, which sets `result = "8"`, `isLoading = false`, and prepends the entry to history. `CalculatorDisplay` and `HistoryPanel` re-render automatically via Zustand subscriptions. |
+
+### Sequence Diagram
+
+```
+User        ButtonPad      Zustand Store    calculatorApi    Controller    CalculatorService   ExpressionEvaluator
+ |               |                |                |               |               |                    |
+ |── click "3" ─▶|                |                |               |               |                    |
+ |               |─ appendToExpression("3") ──────▶|               |               |                    |
+ |               |                |  expression="3" |               |               |                    |
+ |── click "+" ─▶|                |                |               |               |                    |
+ |               |─ appendToExpression("+") ───────▶|              |               |                    |
+ |               |                | expression="3+" |               |               |                    |
+ |── click "5" ─▶|                |                |               |               |                    |
+ |               |─ appendToExpression("5") ───────▶|              |               |                    |
+ |               |                | expression="3+5"|               |               |                    |
+ |               |                |                |               |               |                    |
+ |── click "=" ─▶|                |                |               |               |                    |
+ |               |── store.calculate() ───────────▶|               |               |                    |
+ |               |                |─ isLoading=true |               |               |                    |
+ |               |                |─ calculate("3+5","DEGREES") ───▶|               |                    |
+ |               |                |                |               |               |                    |
+ |               |                |  POST /api/calculate ──────────▶               |                    |
+ |               |                |  { expression:"3+5", angleMode:"DEGREES" }      |                    |
+ |               |                |                |  @Valid ✓     |               |                    |
+ |               |                |                |  service.calculate(request) ──▶|                    |
+ |               |                |                |               |── evaluate("3+5","DEGREES") ───────▶|
+ |               |                |                |               |               |  ExpressionBuilder  |
+ |               |                |                |               |               |  .build().evaluate()|
+ |               |                |                |               |               |  → 8.0              |
+ |               |                |                |               |               |  NaN/∞ check ✓      |
+ |               |                |                |               |               |◀── return 8.0 ──────|
+ |               |                |                |               |◀── { result:8.0, timestamp } ───────|
+ |               |                |                |  historyService.add() ✓       |                    |
+ |               |                |                |◀── HTTP 200 { result:8.0 } ───|                    |
+ |               |                |◀── CalculationResponse ────────|               |                    |
+ |               |                |─ result="8"    |               |               |                    |
+ |               |                |─ isLoading=false               |               |                    |
+ |               |                |─ history prepended             |               |                    |
+ |               |◀── re-render (Zustand → React) ─|              |               |                    |
+ |               | Display: "8"   |                |               |               |                    |
+ |               | HistoryPanel: "3+5 = 8"         |               |               |                    |
+```
+
+### Key design decisions visible in this flow
+
+- **No math on the frontend** — `ButtonPad` only builds a string; all evaluation happens in `ExpressionEvaluator` on the server using exp4j.
+- **Optimistic loading state** — `isLoading: true` is set *before* the HTTP call so the UI is never frozen.
+- **History written server-side** — `HistoryService.add()` is called inside the controller *after* a successful evaluation, so failed expressions are also recorded with their error message.
+- **Single source of truth** — Zustand owns all state; components subscribe and re-render automatically with no prop drilling.
 
 ---
 
