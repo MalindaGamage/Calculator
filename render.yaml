@@ -6,5 +6,5 @@ services:
     plan: free
     envVars:
       - key: ALLOWED_ORIGINS
-        value: https://calculator-YOUR_NAME.vercel.app
+        value: https://calculator-nu-smoky-22.vercel.app
     healthCheckPath: /api/history

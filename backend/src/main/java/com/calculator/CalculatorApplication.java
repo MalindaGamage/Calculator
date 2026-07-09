@@ -18,14 +18,15 @@ public class CalculatorApplication {
         return new WebMvcConfigurer() {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
-                String allowedOrigins = System.getenv("ALLOWED_ORIGINS") != null
-                        ? System.getenv("ALLOWED_ORIGINS")
-                        : "http://localhost:5173";
-                registry.addMapping("/api/**")
-                        .allowedOriginPatterns(allowedOrigins)
+                String env = System.getenv("ALLOWED_ORIGINS");
+                String[] origins = (env != null && !env.isBlank())
+                        ? env.split(",")
+                        : new String[]{"http://localhost:5173"};
+                registry.addMapping("/**")
+                        .allowedOrigins(origins)
                         .allowedMethods("GET", "POST", "DELETE", "PUT", "OPTIONS")
                         .allowedHeaders("*")
-                        .allowCredentials(true);
+                        .maxAge(3600);
             }
         };
     }
